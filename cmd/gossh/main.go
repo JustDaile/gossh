@@ -20,10 +20,8 @@ const (
 
 	serverMode = "server"
 	clientMode = "client"
-)
 
-var (
-	logger = log.NewLogger(log.INFO, os.Stderr)
+	dir = ".gossh"
 )
 
 type Config struct {
@@ -75,6 +73,8 @@ func parseArgs(args []string) (Config, error) {
 	if len(args) < 1 {
 		return Config{}, fmt.Errorf("mode is required")
 	}
+
+	logger := log.NewLogger(log.INFO, os.Stderr)
 
 	cfg := Config{
 		httpServerPort: defaultHTTPPort,
@@ -160,17 +160,49 @@ func parseArgs(args []string) (Config, error) {
 }
 
 func main() {
+	// Directory startup
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		log.NewLogger(log.ERROR, os.Stderr).Error("Failed to detect home directory: %v", err)
+	}
+
 	cfg, err := parseArgs(os.Args[1:])
 	if err != nil {
 		usage()
-		logger.Error("%v", err)
+		log.NewLogger(log.ERROR, os.Stderr).Error("%v", err)
 		os.Exit(1)
 	}
+
+	logger := log.NewLogger(log.INFO, os.Stderr)
 
 	var runErr error
 
 	switch cfg.mode {
 	case serverMode:
+		path := fmt.Sprintf("%s/%s/server", homeDir, dir)
+		err := os.MkdirAll(path, 0755)
+		if err != nil {
+			fmt.Printf("Failed to initialize server directory: %v\n", err)
+			fmt.Printf("Logs may not be saved in daemon mode\n")
+		}
+
+		var logger log.Logger
+
+		if cfg.daemon {
+			logPath := fmt.Sprintf("%s/gossh.log", path)
+
+			file, err := os.Create(logPath)
+			if err != nil {
+				fmt.Printf("Error creating file: %v\n", err)
+				return
+			}
+			defer file.Close()
+
+			logger = log.NewLogger(log.INFO, file)
+		} else {
+			logger = log.NewLogger(log.INFO, os.Stderr)
+		}
+
 		runErr = server.NewGoSSHServer(
 			server.GoSSHServerConfiguration{
 				Port:    cfg.httpServerPort,
@@ -180,6 +212,30 @@ func main() {
 			logger,
 		).Run()
 	case clientMode:
+		path := fmt.Sprintf("%s/%s/client", homeDir, dir)
+		err := os.MkdirAll(path, 0755)
+		if err != nil {
+			fmt.Printf("Failed to initialize client directory: %v\n", err)
+			fmt.Printf("Logs may not be saved in daemon mode\n")
+		}
+
+		var logger log.Logger
+
+		if cfg.daemon {
+			logPath := fmt.Sprintf("%s/gossh.log", path)
+
+			file, err := os.Create(logPath)
+			if err != nil {
+				fmt.Printf("Error creating file: %v\n", err)
+				return
+			}
+			defer file.Close()
+
+			logger = log.NewLogger(log.INFO, file)
+		} else {
+			logger = log.NewLogger(log.INFO, os.Stderr)
+		}
+
 		runErr = client.NewGoSSHClient(
 			client.GoSSHClientConfiguration{
 				Port:            cfg.tcpServerPort,
