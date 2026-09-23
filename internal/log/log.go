@@ -2,8 +2,11 @@ package log
 
 import (
 	"fmt"
+	"gossh/internal/log/text"
 	"io"
 	"log"
+	"os"
+	"time"
 )
 
 // Logger defines the methods used by the project logger.
@@ -25,6 +28,10 @@ const (
 
 type LogLevel string
 
+func (level LogLevel) string() string {
+	return string(level)
+}
+
 func (level LogLevel) getVerbosity() int {
 	switch level {
 	case TRACE:
@@ -42,6 +49,23 @@ func (level LogLevel) getVerbosity() int {
 	}
 }
 
+func (level LogLevel) getColored() string {
+	switch level {
+	case TRACE:
+		return text.Color{}.Magenta(level.string())
+	case DEBUG:
+		return text.Color{}.Blue(level.string())
+	case INFO:
+		return text.Color{}.Cyan(level.string())
+	case WARN:
+		return text.Color{}.Yellow(level.string())
+	case ERROR:
+		return text.Color{}.Red(level.string())
+	default:
+		return text.Color{}.Red(level.string())
+	}
+}
+
 type logger struct {
 	i     *log.Logger
 	level LogLevel
@@ -50,16 +74,20 @@ type logger struct {
 // NewLogger creates a logger that implements the Logger interface.
 func NewLogger(level LogLevel, out io.Writer) *logger {
 	return &logger{
-		i:     log.New(out, "", log.LstdFlags),
+		i:     log.New(out, "", 0),
 		level: level,
 	}
 }
+
+var DefaultLogger = NewLogger(TRACE, os.Stderr)
 
 func (l *logger) print(level LogLevel, format string, args ...any) {
 	if level.getVerbosity() > l.level.getVerbosity() {
 		return
 	}
-	l.i.Printf("[%s] %s\n", level, fmt.Sprintf(format, args...))
+	// \r\x1b[2K moves to the beggining of the line, and clears it.
+	// time will be deleted from the underlying logger.
+	l.i.Printf("\r\x1b[2K %s [%s] %s\n", time.Now().Format(time.DateTime), level.getColored(), fmt.Sprintf(format, args...))
 }
 
 // SetVerbosity
