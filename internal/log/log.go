@@ -2,7 +2,6 @@ package log
 
 import (
 	"fmt"
-	"gossh/internal/log/text"
 	"io"
 	"log"
 	"os"
@@ -52,17 +51,17 @@ func (level LogLevel) getVerbosity() int {
 func (level LogLevel) getColored() string {
 	switch level {
 	case TRACE:
-		return text.Color{}.Magenta(level.string())
+		return Color{}.Magenta(level.string())
 	case DEBUG:
-		return text.Color{}.Blue(level.string())
+		return Color{}.Blue(level.string())
 	case INFO:
-		return text.Color{}.Cyan(level.string())
+		return Color{}.Cyan(level.string())
 	case WARN:
-		return text.Color{}.Yellow(level.string())
+		return Color{}.Yellow(level.string())
 	case ERROR:
-		return text.Color{}.Red(level.string())
+		return Color{}.Red(level.string())
 	default:
-		return text.Color{}.Red(level.string())
+		return Color{}.Red(level.string())
 	}
 }
 
