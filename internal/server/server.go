@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -28,6 +29,9 @@ const (
 type GoSSHServer struct {
 	conf   GoSSHServerConfiguration
 	logger log.Logger
+
+	startedAt      time.Time
+	activeSessions int32
 }
 
 type GoSSHServerConfiguration struct {
@@ -36,14 +40,17 @@ type GoSSHServerConfiguration struct {
 	Timeout time.Duration
 }
 
-func NewGoSSHServer(config GoSSHServerConfiguration, logger log.Logger) GoSSHServer {
-	return GoSSHServer{
-		conf:   config,
-		logger: logger,
+func NewGoSSHServer(config GoSSHServerConfiguration, logger log.Logger) *GoSSHServer {
+	return &GoSSHServer{
+		conf:      config,
+		logger:    logger,
+		startedAt: time.Now(),
 	}
 }
 
-func (gossh GoSSHServer) Run() error {
+func (gossh *GoSSHServer) Run() error {
+	gossh.startedAt = time.Now()
+
 	addr := fmt.Sprintf(":%d", gossh.conf.Port)
 
 	mux := http.NewServeMux()
@@ -91,7 +98,7 @@ func (gossh GoSSHServer) Run() error {
 	return err
 }
 
-func (gossh GoSSHServer) handleServerWebSocket(w http.ResponseWriter, r *http.Request) {
+func (gossh *GoSSHServer) handleServerWebSocket(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/ws" {
 		http.NotFound(w, r)
 		return
@@ -123,12 +130,14 @@ func (gossh GoSSHServer) handleServerWebSocket(w http.ResponseWriter, r *http.Re
 	gossh.logger.Info("Connected to sshd successfully")
 
 	session := tunnel.NewSession(ws, tcp)
-
 	gossh.runServerSession(session)
 }
 
-func (gossh GoSSHServer) runServerSession(s *tunnel.Session) {
+func (gossh *GoSSHServer) runServerSession(s *tunnel.Session) {
 	defer s.Close()
+
+	atomic.AddInt32(&gossh.activeSessions, 1)
+	defer atomic.AddInt32(&gossh.activeSessions, -1)
 
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -136,6 +145,7 @@ func (gossh GoSSHServer) runServerSession(s *tunnel.Session) {
 	// WebSocket -> SSH
 	go func() {
 		defer wg.Done()
+		defer s.Close()
 
 		for {
 			messageType, data, err := s.ReadWS()
@@ -162,6 +172,7 @@ func (gossh GoSSHServer) runServerSession(s *tunnel.Session) {
 	// SSH -> WebSocket
 	go func() {
 		defer wg.Done()
+		defer s.Close()
 
 		buf := make([]byte, ReadBufSize)
 

@@ -124,6 +124,7 @@ func (gossh GoSSHClient) runClientSession(s *tunnel.Session) {
 	// Local SSH client -> WebSocket
 	go func() {
 		defer wg.Done()
+		defer s.Close()
 
 		buf := make([]byte, ReadBufSize)
 
@@ -153,6 +154,7 @@ func (gossh GoSSHClient) runClientSession(s *tunnel.Session) {
 	// WebSocket -> local SSH client
 	go func() {
 		defer wg.Done()
+		defer s.Close()
 
 		for {
 			messageType, data, err := s.ReadWS()
