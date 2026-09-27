@@ -33,6 +33,8 @@ CLIENT_LOG=""
 SSHD_LOG=""
 SSH_LOG=""
 
+DAEMON_MODE_LOG_DIR="~/.gossh"
+
 dump_logs() {
     for log in "$SSH_LOG" "$SSHD_LOG" "$SERVER_LOG" "$CLIENT_LOG"; do
         if [ -n "$log" ] && [ -f "$log" ]; then
@@ -57,11 +59,31 @@ cleanup() {
         rm -rf "$WORK_DIR"
     fi
 
+    if [ -n "$DAEMON_MODE_LOG_DIR" ] && [ -d "$DAEMON_MODE_LOG_DIR" ]; then
+        rm -rf "$DAEMON_MODE_LOG_DIR"
+    fi
+
     echo "[TEST] Cleanup complete."
 }
 
 trap cleanup EXIT
 
+cleanup_server_client() {
+    echo "[TEST] Cleaning up only server client..."
+
+    for pid in "$CLIENT_PID" "$SERVER_PID"; do
+        if [ -n "$pid" ]; then
+            kill "$pid" 2>/dev/null || true
+            wait "$pid" 2>/dev/null || true
+        fi
+    done
+    
+    if [ -n "$DAEMON_MODE_LOG_DIR" ] && [ -d "$DAEMON_MODE_LOG_DIR" ]; then
+        rm -rf "$DAEMON_MODE_LOG_DIR"
+    fi
+    echo "[TEST] Cleanup complete."
+
+}
 # Waits for something to accept connections on a local TCP port. Bash's
 # /dev/tcp redirection keeps this free of netcat, which the macOS runner does
 # not ship.
@@ -193,37 +215,73 @@ fi
 
 echo "[OK] sshd started (PID=$SSHD_PID)"
 
-echo "[TEST] Starting gossh server..."
+test_gossh_server() {
+    echo "[TEST] Starting gossh server..."
 
-"$GOSSH" server \
-    --port "$SERVER_PORT" \
-    --ssh "$SSH_PORT" \
-    -vvv > "$SERVER_LOG" 2>&1 &
+    "$GOSSH" server \
+        --port "$SERVER_PORT" \
+        --ssh "$SSH_PORT" \
+        -vvv > "$SERVER_LOG" 2>&1 &
 
-SERVER_PID=$!
+    SERVER_PID=$!
+    if ! wait_for_port "$SERVER_PORT" "gossh server"; then
+        dump_logs
+        exit 1
+    fi
+    echo "[OK] gossh server started (PID=$SERVER_PID)"
+}
 
-if ! wait_for_port "$SERVER_PORT" "gossh server"; then
-    dump_logs
-    exit 1
-fi
+test_gossh_server_daemon() {
+    echo "[TEST] Starting gossh server in daemon mode..."
 
-echo "[OK] gossh server started (PID=$SERVER_PID)"
+    "$GOSSH" server \
+        --port "$SERVER_PORT" \
+        --ssh "$SSH_PORT" \
+        -vvv \
+        --daemon
 
-echo "[TEST] Starting gossh client..."
+    SERVER_PID=$(cat ~/.gossh/server.pid)
 
-"$GOSSH" client \
-    --connect "ws://127.0.0.1:$SERVER_PORT" \
-    --port "$CLIENT_PORT" \
-    -vvv > "$CLIENT_LOG" 2>&1 &
+    if ! wait_for_port "$SERVER_PORT" "gossh server"; then
+        dump_logs
+        exit 1
+    fi
 
-CLIENT_PID=$!
+    echo "[OK] gossh server started in daemon mode (PID=$SERVER_PID)"
+}
 
-if ! wait_for_port "$CLIENT_PORT" "gossh client"; then
-    dump_logs
-    exit 1
-fi
+test_gossh_client() {
+    echo "[TEST] Starting gossh client..."
 
-echo "[OK] gossh client is listening on port $CLIENT_PORT"
+    "$GOSSH" client \
+        --connect "ws://127.0.0.1:$SERVER_PORT" \
+        --port "$CLIENT_PORT" \
+        -vvv > "$CLIENT_LOG" 2>&1 &
+
+    CLIENT_PID=$!
+    if ! wait_for_port "$CLIENT_PORT" "gossh client"; then
+        dump_logs
+        exit 1
+    fi
+    echo "[OK] gossh client is listening on port $CLIENT_PORT"
+}
+
+test_gossh_client_daemon() {
+    echo "[TEST] Starting gossh client..."
+
+    "$GOSSH" client \
+        --connect "ws://127.0.0.1:$SERVER_PORT" \
+        --port "$CLIENT_PORT" \
+        -vvv \
+        --daemon
+
+    CLIENT_PID=$(cat ~/.gossh/client.pid)
+    if ! wait_for_port "$CLIENT_PORT" "gossh client"; then
+        dump_logs
+        exit 1
+    fi
+    echo "[OK] gossh client is listening on port $CLIENT_PORT in daemon mode"
+}
 
 run_ssh() {
     ssh \
@@ -243,36 +301,51 @@ run_ssh() {
         "$@" 2>>"$SSH_LOG"
 }
 
-echo "[TEST] Connecting through gossh tunnel..."
+test_gossh_tunnel() {
+    echo "[TEST] Connecting through gossh tunnel..."
 
-OUTPUT="$(run_ssh "echo integration-test" || true)"
-EXPECTED="integration-test"
+    OUTPUT="$(run_ssh "echo integration-test" || true)"
+    EXPECTED="integration-test"
 
-if [ "$OUTPUT" != "$EXPECTED" ]; then
-    echo "[FAIL] Unexpected SSH output"
-    echo "Expected: $EXPECTED"
-    echo "Actual:   $OUTPUT"
-    dump_logs
-    exit 1
-fi
+    if [ "$OUTPUT" != "$EXPECTED" ]; then
+        echo "[FAIL] Unexpected SSH output"
+        echo "Expected: $EXPECTED"
+        echo "Actual:   $OUTPUT"
+        dump_logs
+        exit 1
+    fi
+    echo "[OK] SSH command executed successfully"
+    echo "[OK] Received: $OUTPUT"
+}
 
-echo "[OK] SSH command executed successfully"
-echo "[OK] Received: $OUTPUT"
+test_bidirectional_ssh() {
+    echo "[TEST] Testing stdin -> remote -> stdout..."
 
-echo "[TEST] Testing stdin -> remote -> stdout..."
+    OUTPUT="$(printf 'hello-from-client\n' | run_ssh "cat" || true)"
+    EXPECTED="hello-from-client"
 
-OUTPUT="$(printf 'hello-from-client\n' | run_ssh "cat" || true)"
-EXPECTED="hello-from-client"
+    if [ "$OUTPUT" != "$EXPECTED" ]; then
+        echo "[FAIL] Bidirectional SSH test failed"
+        echo "Expected: $EXPECTED"
+        echo "Actual:   $OUTPUT"
+        dump_logs
+        exit 1
+    fi
+    echo "[OK] Bidirectional SSH test passed"
+}
 
-if [ "$OUTPUT" != "$EXPECTED" ]; then
-    echo "[FAIL] Bidirectional SSH test failed"
-    echo "Expected: $EXPECTED"
-    echo "Actual:   $OUTPUT"
-    dump_logs
-    exit 1
-fi
+test_gossh_server
+test_gossh_client
+test_gossh_tunnel
+test_bidirectional_ssh
 
-echo "[OK] Bidirectional SSH test passed"
+cleanup_server_client
+echo ""
+
+test_gossh_server_daemon
+test_gossh_client_daemon
+test_gossh_tunnel
+test_bidirectional_ssh
 
 echo ""
 echo "[OK] GOSSH INTEGRATION TEST PASSED"
