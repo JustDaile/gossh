@@ -197,6 +197,7 @@ func (gossh *GoSSHServer) runServerSession(s *tunnel.Session) {
 			}
 
 			gossh.logger.Trace("Forwarded %d bytes WS -> TCP", len(data))
+			atomic.AddInt64(&gossh.bytesIn, int64(len(data)))
 		}
 	}()
 
@@ -218,6 +219,7 @@ func (gossh *GoSSHServer) runServerSession(s *tunnel.Session) {
 				}
 
 				gossh.logger.Trace("Forwarded %d bytes TCP -> WS", n)
+				atomic.AddInt64(&gossh.bytesOut, int64(n))
 			}
 
 			if err != nil {
