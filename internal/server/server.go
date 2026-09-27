@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"sync"
 	"sync/atomic"
+	"encoding/json"
 	"syscall"
 	"time"
 
@@ -32,6 +33,9 @@ type GoSSHServer struct {
 
 	startedAt      time.Time
 	activeSessions int32
+
+	bytesIn  int64
+	bytesOut int64
 }
 
 type GoSSHServerConfiguration struct {
@@ -50,12 +54,17 @@ func NewGoSSHServer(config GoSSHServerConfiguration, logger log.Logger) *GoSSHSe
 
 func (gossh *GoSSHServer) Run() error {
 	gossh.startedAt = time.Now()
-
 	addr := fmt.Sprintf(":%d", gossh.conf.Port)
 
 	mux := http.NewServeMux()
+	// '/ws' is the general endpoint for ssh connections
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		gossh.handleServerWebSocket(w, r)
+	})
+
+	// '/status' endpoint is for server status
+	mux.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
+		gossh.handleServerStatus(w, r)
 	})
 
 	server := &http.Server{
@@ -131,6 +140,28 @@ func (gossh *GoSSHServer) handleServerWebSocket(w http.ResponseWriter, r *http.R
 
 	session := tunnel.NewSession(ws, tcp)
 	gossh.runServerSession(session)
+}
+
+func (gossh *GoSSHServer) handleServerStatus(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/status" {
+		http.NotFound(w, r)
+		return
+	}
+
+	resp := struct {
+		Uptime         string `json:"uptime"`
+		ActiveSessions int32  `json:"active_sessions"`
+		In             int64  `json:"bytes_in"`
+		Out            int64  `json:"bytes_out"`
+	}{
+		Uptime:         time.Since(gossh.startedAt).Round(time.Second).String(),
+		ActiveSessions: atomic.LoadInt32(&gossh.activeSessions),
+		In:             atomic.LoadInt64(&gossh.bytesIn),
+		Out:            atomic.LoadInt64(&gossh.bytesOut),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }
 
 func (gossh *GoSSHServer) runServerSession(s *tunnel.Session) {
