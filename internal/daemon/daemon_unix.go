@@ -30,7 +30,7 @@ func Daemonize(logger log.Logger, args []string, path string) {
 		Dir: "/",
 		Env: env,
 		Sys: &syscall.SysProcAttr{
-			Setsid: true, // Setsid doesn't exist within the SysProcAttr struct on on Windows.
+			Setsid: true, // Setsid doesn't exist within the SysProcAttr struct on Windows.
 		},
 	}
 
