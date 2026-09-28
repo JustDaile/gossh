@@ -252,13 +252,6 @@ func main() {
 				logger,
 			).Run()
 		}
-		runErr = client.NewGoSSHClient(
-			client.GoSSHClientConfiguration{
-				Port:            cfg.tcpServerPort,
-				RawWebsocketURL: cfg.wsURL,
-			},
-			logger,
-		).Run()
 	case statusMode:
 		url := strings.TrimRight(cfg.wsURL, "/") + "/status"
 
