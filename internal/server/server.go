@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"gossh/internal/log"
 	"gossh/internal/tunnel"
@@ -32,6 +33,9 @@ type GoSSHServer struct {
 
 	startedAt      time.Time
 	activeSessions int32
+
+	bytesIn  int64
+	bytesOut int64
 }
 
 type GoSSHServerConfiguration struct {
@@ -50,12 +54,17 @@ func NewGoSSHServer(config GoSSHServerConfiguration, logger log.Logger) *GoSSHSe
 
 func (gossh *GoSSHServer) Run() error {
 	gossh.startedAt = time.Now()
-
 	addr := fmt.Sprintf(":%d", gossh.conf.Port)
 
 	mux := http.NewServeMux()
+	// '/ws' is the general endpoint for ssh connections
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		gossh.handleServerWebSocket(w, r)
+	})
+
+	// '/status' endpoint is for server status
+	mux.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
+		gossh.handleServerStatus(w, r)
 	})
 
 	server := &http.Server{
@@ -133,6 +142,28 @@ func (gossh *GoSSHServer) handleServerWebSocket(w http.ResponseWriter, r *http.R
 	gossh.runServerSession(session)
 }
 
+func (gossh *GoSSHServer) handleServerStatus(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/status" {
+		http.NotFound(w, r)
+		return
+	}
+
+	resp := struct {
+		Uptime         string `json:"uptime"`
+		ActiveSessions int32  `json:"active_sessions"`
+		In             int64  `json:"bytes_in"`
+		Out            int64  `json:"bytes_out"`
+	}{
+		Uptime:         time.Since(gossh.startedAt).Round(time.Second).String(),
+		ActiveSessions: atomic.LoadInt32(&gossh.activeSessions),
+		In:             atomic.LoadInt64(&gossh.bytesIn),
+		Out:            atomic.LoadInt64(&gossh.bytesOut),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
 func (gossh *GoSSHServer) runServerSession(s *tunnel.Session) {
 	defer s.Close()
 
@@ -166,6 +197,7 @@ func (gossh *GoSSHServer) runServerSession(s *tunnel.Session) {
 			}
 
 			gossh.logger.Trace("Forwarded %d bytes WS -> TCP", len(data))
+			atomic.AddInt64(&gossh.bytesIn, int64(len(data)))
 		}
 	}()
 
@@ -187,6 +219,7 @@ func (gossh *GoSSHServer) runServerSession(s *tunnel.Session) {
 				}
 
 				gossh.logger.Trace("Forwarded %d bytes TCP -> WS", n)
+				atomic.AddInt64(&gossh.bytesOut, int64(n))
 			}
 
 			if err != nil {

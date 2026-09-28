@@ -8,8 +8,10 @@ import (
 	"gossh/internal/log"
 	"gossh/internal/server"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -22,6 +24,7 @@ const (
 
 	serverMode = "server"
 	clientMode = "client"
+	statusMode = "status"
 
 	appDir = ".gossh"
 )
@@ -90,6 +93,8 @@ func parseArgs(args []string) (Config, error) {
 		cfg.mode = serverMode
 	case clientMode:
 		cfg.mode = clientMode
+	case statusMode:
+		cfg.mode = statusMode
 	default:
 		return Config{}, fmt.Errorf("unknown mode: %s", args[0])
 	}
@@ -103,6 +108,7 @@ func parseArgs(args []string) (Config, error) {
 		port    int
 		sshPort int
 		connect string
+		target  string
 		daemon  bool
 		quiet   bool
 		v       bool
@@ -114,6 +120,7 @@ func parseArgs(args []string) (Config, error) {
 	fs.IntVar(&port, "port", 0, "port")
 	fs.IntVar(&sshPort, "ssh", defaultSSHPort, "SSH port")
 	fs.StringVar(&connect, "connect", "", "remote URL")
+	fs.StringVar(&target, "target", "", "remote URL")
 	fs.BoolVar(&daemon, "daemon", false, "daemonize")
 	fs.BoolVar(&quiet, "quiet", false, "quiet")
 	fs.BoolVar(&v, "v", false, "info")
@@ -146,13 +153,21 @@ func parseArgs(args []string) (Config, error) {
 			cfg.httpServerPort = port
 		}
 		cfg.sshdPort = sshPort
-	} else {
+	} else if cfg.mode == clientMode {
 		if port != 0 {
 			cfg.tcpServerPort = port
 		}
 		cfg.wsURL = connect
 		if cfg.wsURL == "" {
 			return Config{}, fmt.Errorf("--connect is required in client mode")
+		}
+	} else {
+		if port != 0 {
+			cfg.tcpServerPort = port
+		}
+		cfg.wsURL = target
+		if cfg.wsURL == "" {
+			return Config{}, fmt.Errorf("--target is required in status mode")
 		}
 	}
 
@@ -237,6 +252,35 @@ func main() {
 				logger,
 			).Run()
 		}
+		runErr = client.NewGoSSHClient(
+			client.GoSSHClientConfiguration{
+				Port:            cfg.tcpServerPort,
+				RawWebsocketURL: cfg.wsURL,
+			},
+			logger,
+		).Run()
+	case statusMode:
+		url := strings.TrimRight(cfg.wsURL, "/") + "/status"
+
+		resp, err := http.Get(url)
+		if err != nil {
+			runErr = fmt.Errorf("cannot reach %s: %w", url, err)
+			break
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			runErr = fmt.Errorf("server returned %s", resp.Status)
+			break
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			runErr = fmt.Errorf("cannot read response: %w", err)
+			break
+		}
+
+		fmt.Println(string(body))
 	default:
 		usage()
 		os.Exit(1)

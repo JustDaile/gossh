@@ -15,6 +15,17 @@ build:
 	mkdir -p $(BIN_DIR)
 	CGO_ENABLED=0 $(GO) build  -o $(BIN_DIR)/$(BINARY) cmd/gossh/main.go
 
+fmt:
+	gofmt -w .
+
+fmt-check:
+	@unformatted=$$(gofmt -l .); \
+	if [ -n "$$unformatted" ]; then \
+		echo "Not formatted:"; \
+		echo "$$unformatted"; \
+		exit 1; \
+	fi
+
 vet:
 	$(GO) vet ./...
 
