@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"gossh/internal/client"
+	"gossh/internal/daemon"
 	"gossh/internal/log"
 	"gossh/internal/server"
 	"io"
@@ -175,8 +176,8 @@ func parseArgs(args []string) (Config, error) {
 
 func main() {
 	var logFile *os.File
-
-	cfg, err := parseArgs(os.Args[1:])
+	args := os.Args
+	cfg, err := parseArgs(args[1:])
 	if err != nil {
 		usage()
 		fmt.Printf("%v\n", err)
@@ -204,18 +205,53 @@ func main() {
 	}
 
 	var runErr error
-
 	switch cfg.mode {
 	case serverMode:
-		runErr = server.NewGoSSHServer(
-			server.GoSSHServerConfiguration{
-				Port:    cfg.httpServerPort,
-				SSHPort: cfg.sshdPort,
-				Timeout: time.Second * 3,
-			},
-			logger,
-		).Run()
+		if cfg.daemon {
+			if os.Getenv("DAEMON_ENV") == "1" {
+				runErr = server.NewGoSSHServer(
+					server.GoSSHServerConfiguration{
+						Port:    cfg.httpServerPort,
+						SSHPort: cfg.sshdPort,
+						Timeout: time.Second * 3,
+					},
+					logger,
+				).Run()
+			} else {
+				daemon.Daemonize(logger, args, filepath.Join(homeDir, appDir, "server.pid"))
+			}
+		} else {
+			runErr = server.NewGoSSHServer(
+				server.GoSSHServerConfiguration{
+					Port:    cfg.httpServerPort,
+					SSHPort: cfg.sshdPort,
+					Timeout: time.Second * 3,
+				},
+				logger,
+			).Run()
+		}
 	case clientMode:
+		if cfg.daemon {
+			if os.Getenv("DAEMON_ENV") == "1" {
+				runErr = client.NewGoSSHClient(
+				client.GoSSHClientConfiguration{
+					Port:            cfg.tcpServerPort,
+					RawWebsocketURL: cfg.wsURL,
+				},
+				logger,
+			).Run()
+			} else {
+				daemon.Daemonize(logger, args, filepath.Join(homeDir, appDir, "client.pid"))
+			}
+		} else {
+			runErr = client.NewGoSSHClient(
+				client.GoSSHClientConfiguration{
+					Port:            cfg.tcpServerPort,
+					RawWebsocketURL: cfg.wsURL,
+				},
+				logger,
+			).Run()
+		}
 		runErr = client.NewGoSSHClient(
 			client.GoSSHClientConfiguration{
 				Port:            cfg.tcpServerPort,
