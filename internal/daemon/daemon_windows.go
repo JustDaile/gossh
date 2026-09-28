@@ -1,3 +1,6 @@
+//go:build windows
+// +build windows
+
 package daemon
 
 import (
@@ -5,6 +8,8 @@ import (
 	"gossh/internal/log"
 	"os"
 	"syscall"
+
+	"golang.org/x/sys/windows"
 )
 
 func Daemonize(logger log.Logger, args []string, path string) {
@@ -27,7 +32,7 @@ func Daemonize(logger log.Logger, args []string, path string) {
 		Dir: "/",
 		Env: env,
 		Sys: &syscall.SysProcAttr{
-			Setsid: true,
+			CreationFlags: windows.CREATE_NEW_PROCESS_GROUP,
 		},
 	}
 
