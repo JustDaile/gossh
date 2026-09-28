@@ -77,4 +77,51 @@ if ! ps -p "$CLIENT_PID" > /dev/null; then
 fi
 
 echo "[TEST] Stopping processes..."
+cleanup
+
+echo ""
+
+sleep 2
+
+echo "[TEST] Starting gossh server with --daemon flag..."
+"$GOSSH" server --port "$SERVER_PORT" --ssh 22 -vvv --daemon
+sleep 1
+
+SERVER_PID=$(cat ~/.gossh/server.pid)
+
+if ps -p "$SERVER_PID" > /dev/null; then
+    echo "[OK] Server started (PID=$SERVER_PID)"
+else
+    echo "[FAIL] Server failed to start"
+    exit 1
+fi
+
+echo "[TEST] Starting gossh client with --daemon flag..."
+"$GOSSH" client --connect "$WS_URL" --port "$CLIENT_PORT" -vvv --daemon
+CLIENT_PID=$(cat ~/.gossh/client.pid)
+sleep 1
+
+if ps -p "$CLIENT_PID" > /dev/null; then
+    echo "[OK] Client started (PID=$CLIENT_PID)"
+else
+    echo "[FAIL] Client failed to start"
+    exit 1
+fi
+
+echo ""
+echo "[TEST] Both server and client launched successfully!"
+sleep 2
+
+# Neither side may have fallen over in the meantime.
+if ! ps -p "$SERVER_PID" > /dev/null; then
+    echo "[FAIL] Server exited unexpectedly"
+    exit 1
+fi
+
+if ! ps -p "$CLIENT_PID" > /dev/null; then
+    echo "[FAIL] Client exited unexpectedly"
+    exit 1
+fi
+
+echo "[TEST] Stopping processes..."
 echo "[DONE] Test complete."
