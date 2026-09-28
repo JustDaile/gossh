@@ -33,7 +33,7 @@ CLIENT_LOG=""
 SSHD_LOG=""
 SSH_LOG=""
 
-DAEMON_MODE_LOG_DIR="~/.gossh"
+DAEMON_MODE_LOG_DIR="$HOME/.gossh"
 
 dump_logs() {
     for log in "$SSH_LOG" "$SSHD_LOG" "$SERVER_LOG" "$CLIENT_LOG"; do
