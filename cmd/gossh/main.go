@@ -234,12 +234,12 @@ func main() {
 		if cfg.daemon {
 			if os.Getenv("DAEMON_ENV") == "1" {
 				runErr = client.NewGoSSHClient(
-				client.GoSSHClientConfiguration{
-					Port:            cfg.tcpServerPort,
-					RawWebsocketURL: cfg.wsURL,
-				},
-				logger,
-			).Run()
+					client.GoSSHClientConfiguration{
+						Port:            cfg.tcpServerPort,
+						RawWebsocketURL: cfg.wsURL,
+					},
+					logger,
+				).Run()
 			} else {
 				daemon.Daemonize(logger, args, filepath.Join(homeDir, appDir, "client.pid"))
 			}
